@@ -515,6 +515,26 @@
   </div>
 </div>
 
+<!-- Modal planificar entrenamiento -->
+<div class="overlay" id="sessionOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sessionModalTitle">Planificar entrenamiento</div>
+    <div class="field-label">Título de la sesión</div>
+    <input type="text" id="sessionTituloInput" placeholder="Ej. Entrenamiento técnico">
+    <div class="field-label">Objetivo / explicación</div>
+    <textarea id="sessionObjetivoInput" placeholder="Escribe aquí qué se va a trabajar en este entrenamiento..." style="width:100%; padding:12px; border-radius:10px; border:1px solid #dde2de; font-size:15px; font-family:'Inter',sans-serif; background:#f8f9f8; color:var(--card-ink); outline:none; min-height:90px; resize:vertical; line-height:1.5;"></textarea>
+    <div class="field-label">Bloques del entrenamiento</div>
+    <div id="sessionBlocksList"></div>
+    <button type="button" class="btn btn-file" id="sessionAddBlockBtn">+ Añadir bloque</button>
+    <div class="field-label">Jugadores convocados</div>
+    <div id="sessionConvocados" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;"></div>
+    <button class="btn btn-primary" id="sessionSaveBtn">Guardar entrenamiento</button>
+    <button class="btn btn-outline" id="sessionCancelBtn">Cancelar</button>
+    <button class="btn-danger-text" id="sessionDeleteBtn" style="display:none">Eliminar entrenamiento</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1239,8 +1259,9 @@
     if(sessions.length===0){
       box.innerHTML = `
         <div class="session-info-empty">No hay ningún entrenamiento planificado este día.</div>
-        <a class="btn btn-file" style="display:block;text-align:center;text-decoration:none;margin-bottom:14px;" href="planificar-entrenamiento.html?fecha=${dateStr}">+ Planificar este entrenamiento</a>
+        <button type="button" class="btn btn-file" id="planSessionBtn" style="display:block;width:100%;text-align:center;margin-bottom:14px;">+ Planificar este entrenamiento</button>
       `;
+      $('planSessionBtn').addEventListener('click', ()=> openSessionModal(dateStr, null));
       return;
     }
     box.innerHTML = sessions.map(s=>{
@@ -1258,9 +1279,12 @@
           ${(s.blocks||[]).map(b=>`<div>• [${TIPO_LABEL[b.tipo]||b.tipo}] ${escapeHtml(b.nombre)} (${b.duracion} min)</div>`).join('')}
         </div>
         ${convocadosNames.length? `<div class="session-info-blocks" style="margin-top:8px;"><b>Convocados:</b> ${convocadosNames.join(', ')}</div>`:''}
-        <a class="btn btn-outline" style="display:block;text-align:center;text-decoration:none;margin-top:10px;" href="planificar-entrenamiento.html?session=${s.id}">Editar en Planificar entrenamiento</a>
+        <button type="button" class="btn btn-outline edit-session-btn" data-id="${s.id}" style="display:block;width:100%;text-align:center;margin-top:10px;">Editar este entrenamiento</button>
       </div>`;
     }).join('');
+    box.querySelectorAll('.edit-session-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=> openSessionModal(dateStr, trainingSessions.find(s=>s.id===btn.dataset.id)));
+    });
   }
 
   function openDayModal(day){
@@ -1319,6 +1343,118 @@
     await saveMonth();
     $('dayPhotoPickBtn').textContent = 'Añadir fotos del entreno';
     e.target.value = '';
+  });
+
+  /* ---------- Planificar entrenamiento (modal) ---------- */
+  let editingSessionId = null;
+  let editingSessionDate = null;
+  let sessionBlocks = [];
+
+  function renderSessionBlocks(){
+    const list = $('sessionBlocksList');
+    if(sessionBlocks.length === 0){
+      list.innerHTML = '<div style="font-size:12px;color:#9aa39c;margin-bottom:8px;">Sin bloques todavía. Añade el primero.</div>';
+      return;
+    }
+    list.innerHTML = sessionBlocks.map((b,i)=>`
+      <div class="block-row" style="display:flex;gap:6px;margin-bottom:8px;align-items:center;">
+        <select class="block-tipo" data-idx="${i}" style="flex:1.1;padding:9px;border-radius:8px;border:1px solid #dde2de;font-family:'Inter',sans-serif;font-size:13px;background:#f8f9f8;color:var(--card-ink);">
+          ${Object.entries(TIPO_LABEL).map(([k,v])=>`<option value="${k}" ${b.tipo===k?'selected':''}>${v}</option>`).join('')}
+        </select>
+        <input type="text" class="block-nombre" data-idx="${i}" placeholder="Nombre del ejercicio" value="${escapeHtml(b.nombre||'')}" style="flex:2;padding:9px;border-radius:8px;border:1px solid #dde2de;font-size:13px;font-family:'Inter',sans-serif;background:#f8f9f8;color:var(--card-ink);">
+        <input type="text" inputmode="numeric" class="block-duracion" data-idx="${i}" placeholder="min" value="${b.duracion||''}" style="width:52px;padding:9px;border-radius:8px;border:1px solid #dde2de;font-size:13px;text-align:center;font-family:'JetBrains Mono',monospace;background:#f8f9f8;color:var(--card-ink);">
+        <button type="button" class="icon-btn danger block-remove" data-idx="${i}" style="width:30px;height:30px;flex-shrink:0;">✕</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('.block-tipo').forEach(el=>{
+      el.addEventListener('change', ()=>{ sessionBlocks[parseInt(el.dataset.idx)].tipo = el.value; });
+    });
+    list.querySelectorAll('.block-nombre').forEach(el=>{
+      el.addEventListener('input', ()=>{ sessionBlocks[parseInt(el.dataset.idx)].nombre = el.value; });
+    });
+    list.querySelectorAll('.block-duracion').forEach(el=>{
+      el.addEventListener('input', ()=>{ sessionBlocks[parseInt(el.dataset.idx)].duracion = parseInt(el.value)||0; });
+    });
+    list.querySelectorAll('.block-remove').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        sessionBlocks.splice(parseInt(el.dataset.idx),1);
+        renderSessionBlocks();
+      });
+    });
+  }
+
+  $('sessionAddBlockBtn').addEventListener('click', ()=>{
+    sessionBlocks.push({tipo:'tecnico', nombre:'', duracion:15});
+    renderSessionBlocks();
+  });
+
+  function renderSessionConvocados(selectedIds){
+    const box = $('sessionConvocados');
+    if(players.length === 0){
+      box.innerHTML = '<div style="font-size:12px;color:#9aa39c;">Añade jugadores en la Plantilla para poder convocarlos.</div>';
+      return;
+    }
+    box.innerHTML = players.map(p=>`
+      <label style="display:flex;align-items:center;gap:5px;background:#f0f3f0;border-radius:20px;padding:6px 10px;font-size:12px;cursor:pointer;">
+        <input type="checkbox" class="convocado-check" value="${p.id}" ${selectedIds.includes(p.id)?'checked':''}>
+        ${p.number ? '#'+escapeHtml(p.number)+' ' : ''}${escapeHtml(p.name)}
+      </label>
+    `).join('');
+  }
+
+  function openSessionModal(dateStr, session){
+    editingSessionId = session ? session.id : null;
+    editingSessionDate = dateStr;
+    sessionBlocks = session ? JSON.parse(JSON.stringify(session.blocks||[])) : [];
+    $('sessionModalTitle').textContent = session ? 'Editar entrenamiento' : 'Planificar entrenamiento';
+    $('sessionTituloInput').value = session ? (session.titulo||'') : '';
+    $('sessionObjetivoInput').value = session ? (session.objetivo||'') : '';
+    renderSessionBlocks();
+    renderSessionConvocados(session ? (session.convocados||[]) : []);
+    $('sessionDeleteBtn').style.display = session ? 'block' : 'none';
+    $('dayOverlay').classList.remove('open');
+    $('sessionOverlay').classList.add('open');
+  }
+  function closeSessionModal(){
+    $('sessionOverlay').classList.remove('open');
+    $('dayOverlay').classList.add('open');
+    editingSessionId = null;
+    editingSessionDate = null;
+    sessionBlocks = [];
+  }
+
+  $('sessionCancelBtn').addEventListener('click', closeSessionModal);
+  $('sessionOverlay').addEventListener('click', (e)=>{ if(e.target.id==='sessionOverlay') closeSessionModal(); });
+
+  $('sessionSaveBtn').addEventListener('click', async ()=>{
+    const titulo = $('sessionTituloInput').value.trim();
+    if(!titulo){ toast('Escribe un título para el entrenamiento.'); return; }
+    const objetivo = $('sessionObjetivoInput').value.trim();
+    const convocados = Array.from(document.querySelectorAll('#sessionConvocados .convocado-check:checked')).map(el=>el.value);
+    const blocksClean = sessionBlocks
+      .filter(b=> (b.nombre||'').trim() !== '')
+      .map(b=>({tipo:b.tipo, nombre:b.nombre.trim(), duracion: b.duracion||0}));
+    if(editingSessionId){
+      const s = trainingSessions.find(x=>x.id===editingSessionId);
+      s.titulo = titulo; s.objetivo = objetivo; s.blocks = blocksClean; s.convocados = convocados;
+    }else{
+      trainingSessions.push({id: uid(), fecha: editingSessionDate, titulo, objetivo, blocks: blocksClean, convocados});
+    }
+    await storeSet('training-sessions', trainingSessions);
+    closeSessionModal();
+    renderDaySessions();
+    renderCalendar();
+    toast('Entrenamiento guardado');
+  });
+
+  $('sessionDeleteBtn').addEventListener('click', async ()=>{
+    if(!editingSessionId) return;
+    trainingSessions = trainingSessions.filter(s=>s.id!==editingSessionId);
+    await storeSet('training-sessions', trainingSessions);
+    closeSessionModal();
+    renderDaySessions();
+    renderCalendar();
+    toast('Entrenamiento eliminado');
   });
 
   /* ---------- Init ---------- */
